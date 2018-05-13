@@ -1,0 +1,134 @@
+---
+title: "Reproducible Research Course Project 2"
+author: "Jackson Hunter"
+date: "13 May 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Damage caused by weather events in the USA, from 1950 to 2011
+
+## Synopsis
+This analysis looks at storm data from the USA over the time period 1950 - 2011.
+
+Tornadoes are the weather events that are most harmful to population health in terms of casualties (fatalities plus injuries). Excessive heat is a distant second, causing only around a tenth of the casulaties caused by tornadoes.
+
+Hurricanes and typhoons are the weather events which have the greatest economic consequences in terms of causing the most damage to property and crops, with a cumulative $72b of damage. In a close second place are tornadoes, with $57b. 
+
+Tornadoes can therefore be said to be the weather events with the worst overall consequences for health, crops, and property in the USA from 1950 - 2011.
+
+<!-- ## Assignment -->
+<!-- The basic goal of this assignment is to explore the NOAA Storm Database and answer some basic questions about severe weather events. You must use the database to answer the questions below and show the code for your entire analysis. Your analysis can consist of tables, figures, or other summaries. You may use any R package you want to support your analysis. -->
+
+<!-- Your data analysis must address the following questions: -->
+
+<!-- 1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health? -->
+
+<!-- 2. Across the United States, which types of events have the greatest economic consequences? -->
+
+<!-- Consider writing your report as if it were to be read by a government or municipal manager who might be responsible for preparing for severe weather events and will need to prioritize resources for different types of events. However, there is no need to make any specific recommendations in your report. -->
+
+## Data Processing
+<!-- There should be a section titled Data Processing which describes (in words and code) how the data were loaded into R and processed for analysis. In particular, your analysis must start from the raw CSV file containing the data. You cannot do any preprocessing outside the document. If preprocessing is time-consuming you may consider using the cache = TRUE option for certain code chunks. -->
+The data was downloaded from https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+
+It was in the form of a compressed csv file, and was read in its compressed state both for convenience and due to its large size. It was read into R in the form of a data frame.
+
+All further processing is described in the applicable Results sections below. 
+```{r echo = TRUE, cache = TRUE}
+# Check whether the raw data has been downloaded
+dataLocal <- "StormData.czv.bz2"
+if(!file.exists(dataLocal)){
+    download.file("https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2", dataLocal)
+}
+# Read the data
+data <- read.csv(dataLocal)
+```
+
+## Results
+<!-- There should be a section titled Results in which your results are presented. -->
+
+### 1. Across the United States, which types of events are most harmful with respect to population health?
+The raw data was subset into a data frame which contained only those weather events which resulted in fatalities or injuries. 
+
+The measure of harmfulness to population health was defined as causalties, and equal to fatalities plus injuries. This means fatalities and injuries are given an equal weighting in this analysis.
+```{r echo = TRUE}
+# Clean the EVTYPE variable and make it all upper case
+data$EVTYPEClean <- data$EVTYPE
+data$EVTYPEClean <- trimws(data$EVTYPEClean)
+data$EVTYPEClean <- toupper(data$EVTYPEClean)
+
+# Subset the data into a data frame of only events where casualties (i.e. fatalitites or injuries) occured
+casualtyData <- data[data$FATALITIES > 0 | data$INJURIES > 0, ]
+casualtyData$CASUALTIES <- casualtyData$FATALITIES + casualtyData$INJURIES
+# Aggregate the casualty data by event type, sort from highest to lowest and keep only the 10 most harmful
+aggCasualtyData <- aggregate(casualtyData$CASUALTIES, list(casualtyData$EVTYPEClean), sum)
+colnames(aggCasualtyData) <- c("EVTYPEClean", "CASUALTIES")
+aggCasualtyData <- aggCasualtyData[order(-aggCasualtyData$CASUALTIES),]
+aggCasualtyData <- aggCasualtyData[1:10,]
+aggCasualtyData
+# Plot the results
+library(ggplot2)
+q <- ggplot(aggCasualtyData,aes(x = reorder(EVTYPEClean, -CASUALTIES), y = CASUALTIES))
+q <- q + geom_bar(stat="identity")
+q <- q + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+q <- q + labs(title = "Number of casualties by event type", subtitle = "Data is from the USA NOAA, 1950-2011", x = "EVENT TYPE")
+q
+
+```
+
+The plot and table above show the ten most harmful types of weather events to public health in the USA. The data is from the NOAA and covers the period 1950 to 2011. It is clear that tornadoes cause by far the highest number of casualties, followed by excessive heat. 
+
+Note that "Excessive heat" and "Heat" should probably be combined, as should "Thunderstorm wind" and "TSTM wind", "Ice storm" and "Winter storm", and "Flood" and "Flash flood". This is a recommendation for further work in this area.
+
+### 2. Across the United States, which types of events have the greatest economic consequences?
+The raw data was subset into a data frame containing only those weather events which resulted in damage to crops and/or property.
+
+There appeared to be an outlier in the raw data. A flood in the Napa Valley with ref num 605943 had a PROPDMGEXP of B, implying US$115b of damage occured. It should probably be US$115m as a quick Google search revealed no news record of a Napa Valley flood causing hundreds of billions worth of damage in 2006. The presumed outlier was corrected to US$115m.
+```{r echo = TRUE}
+# Subset the data into only those cases where property or crop damage occurred
+econData <- data[data$PROPDMG > 0 | data$CROPDMG > 0, ]
+
+# There is an outlier - ref num 605943 has a PROPDMGEXP of B meaning US$115b of damage occured, should probably be US$115m as there is no news record of a Napa valley flood causing hundreds of billions worth of damage in 2006.
+# Here the outlier value is manually changed:
+econData$PROPDMGEXP[econData$REFNUM==605943] <- "M"
+# Convert the K, M, B multipliers into numbers
+econData$propDmgMulti <- (econData$PROPDMGEXP=="K") * 1e3 + (econData$PROPDMGEXP=="M") * 1e6 + (econData$PROPDMGEXP=="B") * 1e9
+econData$cropDmgMulti <- (econData$CROPDMGEXP=="K") * 1e3 + (econData$CROPDMGEXP=="M") * 1e6 + (econData$CROPDMGEXP=="B") * 1e9
+# Convert the damage into base currency i.e. remove K, M, B
+econData$PROPDMGRaw <- econData$PROPDMG * econData$propDmgMulti
+econData$CROPDMGRaw <- econData$CROPDMG * econData$cropDmgMulti
+# COnvert into one dollar amount, in billions of dollars
+econData$totalDamage <- (econData$PROPDMGRaw + econData$CROPDMGRaw) / 1e9
+# Aggregate the economic data by event type, sort from highest to lowest and keep only the 10 most harmful
+aggEconData <- aggregate(econData$totalDamage, list(econData$EVTYPEClean), sum)
+colnames(aggEconData) <- c("EVTYPEClean", "totalDamage")
+aggEconData <- aggEconData[order(-aggEconData$totalDamage),]
+aggEconData <- aggEconData[1:10,]
+aggEconData
+# Plot the results
+q <- ggplot(aggEconData,aes(x = reorder(EVTYPEClean, -totalDamage), y = totalDamage))
+q <- q + geom_bar(stat="identity")
+q <- q + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+q <- q + labs(title = "Total damage to property and crops by event type", subtitle = "Data is from the USA NOAA, 1950-2011", x = "EVENT TYPE", y = "Total damage in US$b")
+q
+
+```
+
+The plot and table above show the ten most economically damaging types of weather events in the USA. The data is from the NOAA and covers the period 1950 to 2011. It is clear that hurricanes and typhoons cause the most damage to property and crops. 
+
+Note that these figures have not undergone any correction for inflation so the data will weight more recent events as relatively more damaging than earlier events. Note also that "HURRICANE/TYPHOON" and "HURRICANE" should probably be combined into one event type. 
+
+
+
+<!-- ## Other instructions -->
+<!-- You may have other sections in your analysis, but Data Processing and Results are required. -->
+
+<!-- The analysis document must have at least one figure containing a plot. -->
+<!-- Your analysis must have no more than three figures. Figures may have multiple plots in them (i.e. panel plots), but there cannot be more than three figures total. -->
+
+<!-- You must show all your code for the work in your analysis document. This may make the document a bit verbose, but that is okay. In general, you should ensure that echo=TRUE for every code chunk (this is the default setting in knitr). -->
+
+
